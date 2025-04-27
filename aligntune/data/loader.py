@@ -4,6 +4,8 @@ import pandas as pd
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 from aligntune.utils.processor import PaliGemmaProcessor
+import random
+import torch
 
 
 class AlignTuneDataset(Dataset):
@@ -12,9 +14,10 @@ class AlignTuneDataset(Dataset):
         self.data = self.data[self.data["split"] == task]
         # add os.path.join(path, "image") for each image
         self.data["image_path"] = self.data["image"].apply(
-            lambda x: os.path.join(path, "image", x)
+            lambda x: os.path.join(path, "resized", x)
         )
-        # drop image column
+
+        self.task = task
         self.data = self.data.drop(columns=["image", "split", "source"])
         self.processor = processor
 
@@ -24,15 +27,46 @@ class AlignTuneDataset(Dataset):
     def __getitem__(self, idx):
         image_path = os.path.join(self.data.iloc[idx]["image_path"])
         image = Image.open(image_path).convert("RGB")
-        prompt = self.data.iloc[idx]["caption"]
-        # Convert the image to a tensor
+
+        caption_idx = random.randint(1, 5)
+        target_caption = self.data.iloc[idx][f"caption_{caption_idx}"]
+
+        prompt = "Describe the image in detail"
         model_inputs = self.processor(
-            text=[prompt],
+            text=[
+                prompt
+            ],  # Single prompt for all images, "Describe the image in detail"
             images=[image],
-            padding="max_length",
-            truncation=True,
+            padding=False,
+            truncation=False,
+            max_length=512,
         )
+
+        target_encoding = self.processor.tokenizer(
+            target_caption,
+            padding=False,
+            truncation=False,
+            max_length=512,
+            return_tensors="pt",
+        )
+        model_inputs["labels"] = target_encoding.input_ids
+
         return model_inputs
+
+
+def custom_collate_fn(batch):
+    """Custom collate function to handle different sized tensors."""
+    result = {}
+    keys = list(batch[0].keys())
+    # remove labels from keys
+    keys.remove("labels")
+    for key in keys:
+        result[key] = torch.stack([item[key] for item in batch])
+
+    labels = [batch[i]["labels"] for i in range(len(batch))]
+    result["labels"] = labels
+
+    return result
 
 
 class AlignTuneAnalysisDataModule(L.LightningDataModule):
@@ -78,6 +112,7 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             # pin_memory=True,
             num_workers=self.num_workers,
             shuffle=True,
+            collate_fn=custom_collate_fn,
         )
 
     def val_dataloader(self):
@@ -93,6 +128,7 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             # pin_memory=True,
             num_workers=self.num_workers,
             shuffle=False,
+            collate_fn=custom_collate_fn,
         )
 
     def test_dataloader(self):
@@ -109,4 +145,5 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             drop_last=True,
+            collate_fn=custom_collate_fn,
         )

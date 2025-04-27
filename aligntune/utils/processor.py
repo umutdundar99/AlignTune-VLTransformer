@@ -39,12 +39,13 @@ class PaliGemmaProcessor:
         self,
         text: List[str],
         images: List[Image.Image],
-        padding: str = "longest",
+        padding: str = "max_length",
         truncation: bool = True,
+        max_length: int = 512,
     ) -> dict:
-        assert (
-            len(images) == 1 and len(text) == 1
-        ), f"Received {len(images)} images for {len(text)} prompts."
+        # assert (
+        #     len(images) == 1 and len(text) == 1
+        # ), f"Received {len(images)} images for {len(text)} prompts."
 
         pixel_values = self.process_images(
             images,
@@ -57,7 +58,7 @@ class PaliGemmaProcessor:
         # Convert the list of numpy arrays to a single numpy array with shape [Batch_Size, Channel, Height, Width]
         pixel_values = np.stack(pixel_values, axis=0)
         # Convert the numpy array to a PyTorch tensor
-        pixel_values = torch.tensor(pixel_values)
+        pixel_values = torch.tensor(pixel_values).squeeze(0)
 
         # Prepend a `self.image_seq_length` number of image tokens to the prompt
         input_strings = [
@@ -70,20 +71,24 @@ class PaliGemmaProcessor:
             for prompt in text
         ]
 
-        # Returns the input_ids and attention_mask as PyTorch tensors
         inputs = self.tokenizer(
             input_strings,
             return_tensors="pt",
             padding=padding,
             truncation=truncation,
+            max_length=max_length,
         )
 
-        return_data = {"pixel_values": pixel_values, **inputs}
+        return_data = {
+            "pixel_values": pixel_values,
+            "input_ids": inputs.input_ids[0],
+            "attention_mask": inputs.attention_mask[0],
+        }
 
         return return_data
 
     def add_image_tokens_to_prompt(
-        prefix_prompt, bos_token, image_seq_len, image_token
+        self, prefix_prompt, bos_token, image_seq_len, image_token
     ):
         # Quoting from the blog (https://huggingface.co/blog/paligemma#detailed-inference-process):
         return f"{image_token * image_seq_len}{bos_token}{prefix_prompt}\n"

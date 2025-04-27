@@ -1,20 +1,20 @@
 import torch
-import pytorch_lightning as pl
+import lightning as L
 import numpy as np
 from torchmetrics.text.rouge import ROUGEScore
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from nltk.translate.meteor_score import meteor_score
 import nltk
 from aligntune.src.nn.gemma import PaliGemmaForConditionalGeneration
-from aligntune.src.nn.processing_paligemma import PaliGemmaProcessor
+from aligntune.utils.processor import PaliGemmaProcessor
 import torch.nn.functional as F
 
 # Download necessary NLTK resources
 try:
     nltk.download("wordnet")
     nltk.download("punkt")
-except:
-    print("NLTK download failed, but continuing...")
+except Exception as e:
+    print(f"NLTK download failed: {e}, but continuing...")
 
 
 class CIDErScore:
@@ -73,7 +73,7 @@ class CIDErScore:
         return set(tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1))
 
 
-class PaliGemmaModule(pl.LightningModule):
+class PaliGemmaModule(L.LightningModule):
     def __init__(
         self,
         model: PaliGemmaForConditionalGeneration,
@@ -143,7 +143,7 @@ class PaliGemmaModule(pl.LightningModule):
 
         return {"val_loss": val_loss}
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         # Combine results from all validation steps
         all_references = []
         all_candidates = []

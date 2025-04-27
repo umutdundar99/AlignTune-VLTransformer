@@ -2,7 +2,7 @@ import os
 import torch
 import csv
 from PIL import Image
-from aligntune.src.nn.processing_paligemma import PaliGemmaProcessor
+from aligntune.utils.processor import PaliGemmaProcessor
 from aligntune.src.nn.gemma import KVCache, PaliGemmaForConditionalGeneration
 from aligntune.utils.load_model import load_hf_model
 from tqdm import tqdm

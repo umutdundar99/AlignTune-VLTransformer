@@ -7,7 +7,7 @@ from aligntune.utils.processor import PaliGemmaProcessor
 
 
 def train(
-    batch_size: int = 4,
+    batch_size: int = 2,
     num_epochs: int = 3,
     learning_rate: float = 1e-5,
     max_tokens: int = 100,
@@ -30,8 +30,8 @@ def train(
     processor = PaliGemmaProcessor(model_path, num_image_tokens, image_size)
     data_module = AlignTuneAnalysisDataModule(
         data_path="/home/umutdundar/Desktop/repositories/align-tune/aligntune/data/RISCM",
-        model_path=model_path,
         batch_size=batch_size,
+        num_workers=1,
         processor=processor,
     )
     paligemma_module = PaliGemmaModule(
@@ -44,10 +44,8 @@ def train(
     # Initialize the trainer
     trainer = L.Trainer(
         max_epochs=num_epochs,
-        gpus=1,
         accelerator="gpu",
         precision=16,
-        callbacks=[L.callbacks.ModelCheckpoint(monitor="val_loss")],
     )
 
     # Train the model
