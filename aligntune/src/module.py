@@ -2,8 +2,7 @@ import torch
 import lightning as L
 import numpy as np
 from torchmetrics.text.rouge import ROUGEScore
-from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-from nltk.translate.meteor_score import meteor_score
+from nltk.translate.bleu_score import SmoothingFunction
 import nltk
 from aligntune.src.nn.gemma import PaliGemmaForConditionalGeneration
 from aligntune.utils.processor import PaliGemmaProcessor
@@ -94,6 +93,7 @@ class PaliGemmaModule(L.LightningModule):
         self.temperature = temperature
         self.top_p = top_p
         self.do_sample = do_sample
+        self.criterion = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="none")
 
         # Initialize metrics
         self.rouge = ROUGEScore()
@@ -108,88 +108,90 @@ class PaliGemmaModule(L.LightningModule):
             input_ids=batch["input_ids"],
             pixel_values=batch["pixel_values"],
             attention_mask=batch["attention_mask"],
-            labels=batch["labels"],
         )
         return outputs
 
     def training_step(self, batch, batch_idx):
         outputs = self(batch)
-        loss = outputs.loss
-
-        # Log training loss
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-
-        return loss
+        train_loss = self.criterion(
+            outputs["logits"].view(-1, self.model.config.vocab_size),
+            batch["labels"].view(-1),
+        ).mean()
+        self.log(
+            "train_loss",
+            train_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=batch["input_ids"].size(0),
+        )
+        return train_loss
 
     def validation_step(self, batch, batch_idx):
         outputs = self(batch)
-        val_loss = outputs.loss
+        self._generate_captions({"logits": outputs["logits"][0].unsqueeze(0)})
+        val_loss = self.criterion(
+            outputs["logits"].view(-1, self.model.config.vocab_size),
+            batch["labels"].view(-1),
+        ).mean()
 
-        # Log validation loss
-        self.log("val_loss", val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(
+            "val_loss",
+            val_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=batch["input_ids"].size(0),
+        )
+        return val_loss
 
-        # Generate captions for evaluation metrics
-        if batch_idx % 10 == 0:  # Calculate metrics every 10 batches to save time
-            references = self._decode_labels(batch["labels"])
-            candidates = self._generate_captions(
-                batch["input_ids"], batch["pixel_values"], batch["attention_mask"]
-            )
+    # def on_validation_epoch_end(self, outputs):
+    #     # Combine results from all validation steps
+    #     all_references = []
+    #     all_candidates = []
 
-            return {
-                "val_loss": val_loss,
-                "references": references,
-                "candidates": candidates,
-            }
+    #     for output in outputs:
+    #         if "references" in output and "candidates" in output:
+    #             all_references.extend(output["references"])
+    #             all_candidates.extend(output["candidates"])
 
-        return {"val_loss": val_loss}
+    #     if len(all_references) > 0:
+    #         # Compute BLEU score
+    #         bleu1_scores = []
+    #         bleu4_scores = []
+    #         meteor_scores = []
 
-    def on_validation_epoch_end(self, outputs):
-        # Combine results from all validation steps
-        all_references = []
-        all_candidates = []
+    #         for refs, cand in zip(all_references, all_candidates):
+    #             # BLEU-1
+    #             bleu1 = sentence_bleu(
+    #                 [r.split() for r in refs],
+    #                 cand.split(),
+    #                 weights=(1, 0, 0, 0),
+    #                 smoothing_function=self.smooth,
+    #             )
+    #             bleu1_scores.append(bleu1)
 
-        for output in outputs:
-            if "references" in output and "candidates" in output:
-                all_references.extend(output["references"])
-                all_candidates.extend(output["candidates"])
+    #             # BLEU-4
+    #             bleu4 = sentence_bleu(
+    #                 [r.split() for r in refs],
+    #                 cand.split(),
+    #                 weights=(0.25, 0.25, 0.25, 0.25),
+    #                 smoothing_function=self.smooth,
+    #             )
+    #             bleu4_scores.append(bleu4)
 
-        if len(all_references) > 0:
-            # Compute BLEU score
-            bleu1_scores = []
-            bleu4_scores = []
-            meteor_scores = []
+    #             # METEOR
+    #             meteor = meteor_score([r.split() for r in refs], cand.split())
+    #             meteor_scores.append(meteor)
 
-            for refs, cand in zip(all_references, all_candidates):
-                # BLEU-1
-                bleu1 = sentence_bleu(
-                    [r.split() for r in refs],
-                    cand.split(),
-                    weights=(1, 0, 0, 0),
-                    smoothing_function=self.smooth,
-                )
-                bleu1_scores.append(bleu1)
+    #         # CIDEr
+    #         cider_score = self.cider.compute_score(all_references, all_candidates)
 
-                # BLEU-4
-                bleu4 = sentence_bleu(
-                    [r.split() for r in refs],
-                    cand.split(),
-                    weights=(0.25, 0.25, 0.25, 0.25),
-                    smoothing_function=self.smooth,
-                )
-                bleu4_scores.append(bleu4)
-
-                # METEOR
-                meteor = meteor_score([r.split() for r in refs], cand.split())
-                meteor_scores.append(meteor)
-
-            # CIDEr
-            cider_score = self.cider.compute_score(all_references, all_candidates)
-
-            # Log metrics
-            self.log("val_bleu1", np.mean(bleu1_scores), prog_bar=True)
-            self.log("val_bleu4", np.mean(bleu4_scores), prog_bar=True)
-            self.log("val_meteor", np.mean(meteor_scores), prog_bar=True)
-            self.log("val_cider", cider_score, prog_bar=True)
+    #         # Log metrics
+    #         self.log("val_bleu1", np.mean(bleu1_scores), prog_bar=True)
+    #         self.log("val_bleu4", np.mean(bleu4_scores), prog_bar=True)
+    #         self.log("val_meteor", np.mean(meteor_scores), prog_bar=True)
+    #         self.log("val_cider", cider_score, prog_bar=True)
 
     def configure_optimizers(self):
         # Create optimizer
@@ -229,32 +231,15 @@ class PaliGemmaModule(L.LightningModule):
             decoded_refs.append(refs)
         return decoded_refs
 
-    def _generate_captions(self, input_ids, pixel_values, attention_mask):
-        """Generate captions for validation metrics"""
-        from aligntune.src.nn.gemma import KVCache
-
+    def _generate_captions(self, outputs):
         # For simplicity, use greedy decoding during validation
         generated_captions = []
 
-        for i in range(len(input_ids)):
-            kv_cache = KVCache()
-            img_input_ids = input_ids[i : i + 1]
-            img_pixel_values = pixel_values[i : i + 1]
-            img_attention_mask = attention_mask[i : i + 1]
-
+        for i in range(outputs["logits"].shape[0]):
             stop_token = self.processor.tokenizer.eos_token_id
             generated_tokens = []
 
             for _ in range(self.max_tokens_to_generate):
-                with torch.no_grad():
-                    outputs = self.model(
-                        input_ids=img_input_ids,
-                        pixel_values=img_pixel_values,
-                        attention_mask=img_attention_mask,
-                        kv_cache=kv_cache,
-                    )
-
-                kv_cache = outputs["kv_cache"]
                 next_token_logits = outputs["logits"][:, -1, :]
 
                 if self.do_sample:

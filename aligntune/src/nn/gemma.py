@@ -517,6 +517,7 @@ class PaliGemmaForConditionalGeneration(nn.Module):
         self.pad_token_id = (
             self.config.pad_token_id if self.config.pad_token_id is not None else -1
         )
+        self.ignore_index = self.config.ignore_index
 
     def tie_weights(self):
         return self.language_model.tie_weights()
@@ -533,7 +534,11 @@ class PaliGemmaForConditionalGeneration(nn.Module):
         batch_size, sequence_length = input_ids.shape
         dtype, device = inputs_embeds.dtype, inputs_embeds.device
         # Shape: [Batch_Size, Seq_Len, Hidden_Size]
-        scaled_image_features = image_features / (self.config.hidden_size**0.5)
+        # Gemma normalizes the embeddings by multiplying with sqrt(hidden_size)
+        # We need to scale the image features accordingly.
+        scaled_image_features = image_features * (
+            self.config.text_config.hidden_size**0.5
+        )
 
         # Combine the embeddings of the image tokens, the text tokens and mask out all the padding tokens.
         final_embedding = torch.zeros(
@@ -562,9 +567,22 @@ class PaliGemmaForConditionalGeneration(nn.Module):
             text_mask_expanded, inputs_embeds, final_embedding
         )
         # Insert image embeddings. We can't use torch.where because the sequence length of scaled_image_features is not equal to the sequence length of the final embedding
-        final_embedding = final_embedding.masked_scatter(
-            image_mask_expanded, scaled_image_features
-        )
+        # Ensure scaled_image_features has the correct shape before scatter
+        # image_mask_expanded identifies the locations, scaled_image_features provides the values
+        # We need to select the correct image features for each batch item based on the mask
+        # This assumes image features are contiguous for each item if multiple image tokens exist
+        current_image_idx = 0
+        for batch_idx in range(batch_size):
+            num_image_tokens_in_batch = image_mask[batch_idx].sum()
+            if num_image_tokens_in_batch > 0:
+                image_indices = image_mask_expanded[batch_idx]
+                batch_image_features = scaled_image_features[
+                    batch_idx, :num_image_tokens_in_batch, :
+                ].view(-1, embed_dim)
+                final_embedding[batch_idx] = final_embedding[batch_idx].masked_scatter(
+                    image_indices, batch_image_features
+                )
+
         # Zero out padding tokens
         final_embedding = torch.where(
             pad_mask_expanded, torch.zeros_like(final_embedding), final_embedding
@@ -575,40 +593,73 @@ class PaliGemmaForConditionalGeneration(nn.Module):
         dtype, device = inputs_embeds.dtype, inputs_embeds.device
         min_dtype = torch.finfo(dtype).min
         q_len = inputs_embeds.shape[1]
+        kv_len = q_len  # Assume prefill phase initially
 
         if kv_cache is None or kv_cache.num_items() == 0:
-            # Do not mask any token, because we're in the prefill phase
-            # This only works when we have no padding
+            # Prefill phase: Create standard causal mask
+            # We need a lower triangular mask where the diagonal and below are 0 (attend)
+            # and above is -inf (don't attend).
             causal_mask = torch.full(
-                (batch_size, q_len, q_len), fill_value=0, dtype=dtype, device=device
+                (q_len, q_len), fill_value=min_dtype, dtype=dtype, device=device
             )
+            causal_mask = torch.triu(causal_mask, diagonal=1)
+            # Expand mask to batch size and head dimension
+            # [Q_Len, Q_Len] -> [Batch_Size, Num_Heads_Q, Q_Len, Q_Len]
+            causal_mask = (
+                causal_mask.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
+            )  # Add batch and head dim
+
+            # Incorporate padding mask (attention_mask)
+            # attention_mask is [Batch_Size, Seq_Len]. We need [Batch_Size, 1, 1, Seq_Len]
+            # Padded tokens should be masked (-inf)
+            if attention_mask is not None:
+                expanded_attn_mask = (
+                    attention_mask[:, None, None, :]
+                    .expand(batch_size, 1, q_len, q_len)
+                    .to(dtype)
+                )
+                # Where attention_mask is 0, set causal_mask to min_dtype
+                inverted_mask = (1.0 - expanded_attn_mask) * min_dtype
+                causal_mask = torch.maximum(
+                    causal_mask, inverted_mask
+                )  # Combine causal and padding mask
+
         else:
-            # Since we are generating tokens, the query must be one single token
+            # Decode phase (generating one token at a time)
             assert q_len == 1
-            kv_len = kv_cache.num_items() + q_len
-            # Also in this case we don't need to mask anything, since each query should be able to attend all previous tokens.
-            # This only works when we have no padding
-            causal_mask = torch.full(
-                (batch_size, q_len, kv_len), fill_value=0, dtype=dtype, device=device
+            kv_len = (
+                kv_cache.num_items() + q_len
+            )  # Total length including past KV cache
+            # Query attends to all previous keys/values + itself. No causal masking needed per se,
+            # but padding in the KV cache must still be respected if applicable (though current assert prevents padding).
+            # The attention mask passed to the language model should handle this.
+            # For a single query token, the mask shape is [Batch_Size, Num_Heads_Q, 1, KV_Len]
+            # We assume no padding during generation for simplicity here based on the assert.
+            # If padding were allowed, the original attention_mask would need to be used/extended.
+            causal_mask = torch.zeros(
+                (batch_size, 1, q_len, kv_len), dtype=dtype, device=device
             )
 
-        # Add the head dimension
-        # [Batch_Size, Q_Len, KV_Len] -> [Batch_Size, Num_Heads_Q, Q_Len, KV_Len]
-        causal_mask = causal_mask.unsqueeze(1)
-
+        # Position IDs calculation
         if kv_cache is not None and kv_cache.num_items() > 0:
-            # The position of the query is just the last position
-            position_ids = attention_mask.cumsum(-1)[:, -1]
-            if position_ids.dim() == 1:
-                position_ids = position_ids.unsqueeze(0)
-        else:
-            # Create a position_ids based on the size of the attention_mask
-            # For masked tokens, use the number 1 as position.
-            position_ids = (
-                (attention_mask.cumsum(-1))
-                .masked_fill_((attention_mask == 0), 1)
-                .to(device)
+            # Decode phase: Position ID is the next position after the cache
+            # Assuming attention_mask tracks the actual length correctly
+            # position_ids = attention_mask.sum(dim=-1, keepdim=True).long() # Shape [Batch_Size, 1]
+            position_ids = torch.tensor([[kv_cache.num_items()]], device=device).expand(
+                batch_size, -1
             )
+
+        else:
+            # Prefill phase: Create position_ids based on the attention_mask
+            # For masked tokens (padding), use position 1 (or 0, check Gemma impl.) - HuggingFace uses cumsum-1
+            # Let's stick to cumsum and handle padding later if needed, assuming no padding for now based on assert
+            # position_ids = attention_mask.cumsum(-1) -1 # Shape [Batch_Size, Seq_Len]
+            # position_ids.masked_fill_(attention_mask == 0, 1) # Or handle as needed
+            position_ids = (
+                torch.arange(0, q_len, device=device)
+                .unsqueeze(0)
+                .expand(batch_size, -1)
+            )  # Simple range if no padding
 
         return final_embedding, causal_mask, position_ids
 

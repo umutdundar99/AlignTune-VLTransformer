@@ -61,29 +61,34 @@ class PaliGemmaProcessor:
         pixel_values = torch.tensor(pixel_values).squeeze(0)
 
         # Prepend a `self.image_seq_length` number of image tokens to the prompt
-        input_strings = [
-            self.add_image_tokens_to_prompt(
-                prefix_prompt=prompt,
-                bos_token=self.tokenizer.bos_token,
-                image_seq_len=self.image_seq_length,
-                image_token=self.IMAGE_TOKEN,
+        if text:
+            input_strings = [
+                self.add_image_tokens_to_prompt(
+                    prefix_prompt=prompt,
+                    bos_token=self.tokenizer.bos_token,
+                    image_seq_len=self.image_seq_length,
+                    image_token=self.IMAGE_TOKEN,
+                )
+                for prompt in text
+            ]
+
+            inputs = self.tokenizer(
+                input_strings,
+                return_tensors="pt",
+                padding=padding,
+                truncation=truncation,
+                max_length=max_length,
             )
-            for prompt in text
-        ]
+            return_data = {
+                "pixel_values": pixel_values,
+                "input_ids": inputs.input_ids[0],
+                "attention_mask": inputs.attention_mask[0],
+            }
 
-        inputs = self.tokenizer(
-            input_strings,
-            return_tensors="pt",
-            padding=padding,
-            truncation=truncation,
-            max_length=max_length,
-        )
-
-        return_data = {
-            "pixel_values": pixel_values,
-            "input_ids": inputs.input_ids[0],
-            "attention_mask": inputs.attention_mask[0],
-        }
+        else:
+            return_data = {
+                "pixel_values": pixel_values,
+            }
 
         return return_data
 
