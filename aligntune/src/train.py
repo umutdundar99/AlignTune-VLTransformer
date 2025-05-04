@@ -4,11 +4,14 @@ from aligntune.utils.load_model import load_hf_model
 from aligntune.data.loader import AlignTuneAnalysisDataModule
 from aligntune.src.module import PaliGemmaModule
 from aligntune.utils.processor import PaliGemmaProcessor
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from peft import LoraConfig, TaskType, get_peft_model
+from lightning.pytorch.loggers import WandbLogger
 
 
 def train(
-    batch_size: int = 2,
-    num_epochs: int = 3,
+    batch_size: int = 1,
+    num_epochs: int = 10,
     learning_rate: float = 1e-5,
     max_tokens: int = 100,
 ):
@@ -24,6 +27,16 @@ def train(
 
     model = load_hf_model(model_path, device)
     model = model.to(device).train()
+    peft_config = LoraConfig(
+        task_type=TaskType.SEQ_2_SEQ_LM,
+        r=16,
+        lora_alpha=32,
+        target_modules=["q_proj", "v_proj"],
+        lora_dropout=0.1,
+        bias="none",
+        inference_mode=False,
+    )
+    model = get_peft_model(model, peft_config)
 
     num_image_tokens = model.config.vision_config.num_image_tokens
     image_size = model.config.vision_config.image_size
@@ -34,7 +47,7 @@ def train(
         num_workers=1,
         processor=processor,
     )
-    paligemma_module = PaliGemmaModule(
+    module = PaliGemmaModule(
         model=model,
         processor=processor,
         learning_rate=learning_rate,
@@ -46,7 +59,25 @@ def train(
         max_epochs=num_epochs,
         accelerator="gpu",
         precision=16,
+        logger=WandbLogger(
+            project="align-tune",
+            name="paligemma-3b-pt-224",
+            save_dir="/home/umutdundar/Desktop/repositories/align-tune/aligntune/logs",
+            offline=True,
+        ),
+        callbacks=[
+            ModelCheckpoint(
+                monitor="val/loss",
+                filename="best-checkpoint",
+                mode="min",
+                save_top_k=1,
+            ),
+            LearningRateMonitor(logging_interval="step"),
+        ],
+        enable_progress_bar=True,
+        profiler="simple",
+        log_every_n_steps=1,
     )
 
     # Train the model
-    trainer.fit(paligemma_module, data_module)
+    trainer.fit(module, data_module)

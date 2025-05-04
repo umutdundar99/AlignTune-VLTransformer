@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+
 IMAGENET_STANDARD_MEAN = [0.5, 0.5, 0.5]
 IMAGENET_STANDARD_STD = [0.5, 0.5, 0.5]
 
@@ -61,34 +62,29 @@ class PaliGemmaProcessor:
         pixel_values = torch.tensor(pixel_values).squeeze(0)
 
         # Prepend a `self.image_seq_length` number of image tokens to the prompt
-        if text:
-            input_strings = [
-                self.add_image_tokens_to_prompt(
-                    prefix_prompt=prompt,
-                    bos_token=self.tokenizer.bos_token,
-                    image_seq_len=self.image_seq_length,
-                    image_token=self.IMAGE_TOKEN,
-                )
-                for prompt in text
-            ]
 
-            inputs = self.tokenizer(
-                input_strings,
-                return_tensors="pt",
-                padding=padding,
-                truncation=truncation,
-                max_length=max_length,
+        input_strings = [
+            self.add_image_tokens_to_prompt(
+                prefix_prompt=prompt,
+                bos_token=self.tokenizer.bos_token,
+                image_seq_len=self.image_seq_length,
+                image_token=self.IMAGE_TOKEN,
             )
-            return_data = {
-                "pixel_values": pixel_values,
-                "input_ids": inputs.input_ids[0],
-                "attention_mask": inputs.attention_mask[0],
-            }
+            for prompt in text
+        ]
 
-        else:
-            return_data = {
-                "pixel_values": pixel_values,
-            }
+        inputs = self.tokenizer(
+            input_strings,
+            return_tensors="pt",
+            padding=False,
+            truncation=False,
+            max_length=512,
+        )
+        return_data = {
+            "pixel_values": pixel_values,
+            "input_ids": inputs.input_ids[0],
+            "attention_mask": inputs.attention_mask[0],
+        }
 
         return return_data
 

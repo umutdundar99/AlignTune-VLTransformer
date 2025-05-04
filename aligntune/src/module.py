@@ -7,6 +7,7 @@ import nltk
 from aligntune.src.nn.gemma import PaliGemmaForConditionalGeneration
 from aligntune.utils.processor import PaliGemmaProcessor
 import torch.nn.functional as F
+from aligntune.src.nn.gemma import KVCache
 
 # Download necessary NLTK resources
 try:
@@ -95,6 +96,8 @@ class PaliGemmaModule(L.LightningModule):
         self.do_sample = do_sample
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="none")
 
+        self.do_sample = True
+
         # Initialize metrics
         self.rouge = ROUGEScore()
         self.cider = CIDErScore()
@@ -104,94 +107,96 @@ class PaliGemmaModule(L.LightningModule):
         self.save_hyperparameters(ignore=["model", "processor"])
 
     def forward(self, batch):
-        outputs = self.model(
-            input_ids=batch["input_ids"],
-            pixel_values=batch["pixel_values"],
-            attention_mask=batch["attention_mask"],
+        input_ids = batch["input_ids"]
+        attention_mask = batch["attention_mask"]
+        pixel_values = batch["pixel_values"]
+
+        cum_loss = []
+        generated_tokens = []
+        kv_cache = KVCache()
+
+        for token_idx in range(len(batch["labels"][0])):
+            outputs = self.model(
+                input_ids=input_ids,
+                pixel_values=pixel_values,
+                attention_mask=attention_mask,
+                kv_cache=kv_cache,
+            )
+            kv_cache = outputs["kv_cache"]
+            next_token_logits = outputs["logits"][:, -1, :]
+
+            loss = self.criterion(
+                next_token_logits, batch["labels"][0][token_idx].unsqueeze(0)
+            )
+            cum_loss.append(loss)
+            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            next_token = next_token.squeeze(0)
+            generated_tokens.append(next_token)
+            input_ids = next_token.unsqueeze(-1)
+
+            attention_mask = torch.cat(
+                [attention_mask, torch.ones((1, 1), device=input_ids.device)], dim=-1
+            )
+
+        generated_tokens = torch.cat(generated_tokens, dim=-1)
+        print(
+            "Generated prompt: ",
+            self.processor.tokenizer.decode(generated_tokens, skip_special_tokens=True),
         )
-        return outputs
+        print(
+            "Actual prompt: ",
+            self.processor.tokenizer.decode(
+                batch["input_ids"][0], skip_special_tokens=True
+            ),
+        )
+        cum_loss = torch.cat(cum_loss, dim=-1)
+        return cum_loss.mean(), generated_tokens
 
     def training_step(self, batch, batch_idx):
-        outputs = self(batch)
-        train_loss = self.criterion(
-            outputs["logits"].view(-1, self.model.config.vocab_size),
-            batch["labels"].view(-1),
-        ).mean()
+        loss, generated_prompt = self(batch)
+        # self._generate_captions({"logits": outputs["logits"][0].unsqueeze(0)})
+
         self.log(
             "train_loss",
-            train_loss,
+            loss,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             batch_size=batch["input_ids"].size(0),
         )
-        return train_loss
+        return loss
 
     def validation_step(self, batch, batch_idx):
-        outputs = self(batch)
-        self._generate_captions({"logits": outputs["logits"][0].unsqueeze(0)})
-        val_loss = self.criterion(
-            outputs["logits"].view(-1, self.model.config.vocab_size),
-            batch["labels"].view(-1),
-        ).mean()
+        loss, generated_prompt = self(batch)
+        # self._generate_captions({"logits": outputs["logits"][0].unsqueeze(0)})
 
         self.log(
             "val_loss",
-            val_loss,
-            on_step=False,
+            loss,
+            on_step=True,
             on_epoch=True,
             prog_bar=True,
             batch_size=batch["input_ids"].size(0),
         )
-        return val_loss
+        return loss
 
-    # def on_validation_epoch_end(self, outputs):
-    #     # Combine results from all validation steps
-    #     all_references = []
-    #     all_candidates = []
-
-    #     for output in outputs:
-    #         if "references" in output and "candidates" in output:
-    #             all_references.extend(output["references"])
-    #             all_candidates.extend(output["candidates"])
-
-    #     if len(all_references) > 0:
-    #         # Compute BLEU score
-    #         bleu1_scores = []
-    #         bleu4_scores = []
-    #         meteor_scores = []
-
-    #         for refs, cand in zip(all_references, all_candidates):
-    #             # BLEU-1
-    #             bleu1 = sentence_bleu(
-    #                 [r.split() for r in refs],
-    #                 cand.split(),
-    #                 weights=(1, 0, 0, 0),
-    #                 smoothing_function=self.smooth,
-    #             )
-    #             bleu1_scores.append(bleu1)
-
-    #             # BLEU-4
-    #             bleu4 = sentence_bleu(
-    #                 [r.split() for r in refs],
-    #                 cand.split(),
-    #                 weights=(0.25, 0.25, 0.25, 0.25),
-    #                 smoothing_function=self.smooth,
-    #             )
-    #             bleu4_scores.append(bleu4)
-
-    #             # METEOR
-    #             meteor = meteor_score([r.split() for r in refs], cand.split())
-    #             meteor_scores.append(meteor)
-
-    #         # CIDEr
-    #         cider_score = self.cider.compute_score(all_references, all_candidates)
-
-    #         # Log metrics
-    #         self.log("val_bleu1", np.mean(bleu1_scores), prog_bar=True)
-    #         self.log("val_bleu4", np.mean(bleu4_scores), prog_bar=True)
-    #         self.log("val_meteor", np.mean(meteor_scores), prog_bar=True)
-    #         self.log("val_cider", cider_score, prog_bar=True)
+    def _sample_top_p(self, probs: torch.Tensor, p: float):
+        # (B, vocab_size)
+        probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
+        # (B, vocab_size)
+        probs_sum = torch.cumsum(probs_sort, dim=-1)
+        # (B, vocab_size)
+        # (Substracting "probs_sort" shifts the cumulative sum by 1 position to the right before masking)
+        mask = probs_sum - probs_sort > p
+        # Zero out all the probabilities of tokens that are not selected by the Top P
+        probs_sort[mask] = 0.0
+        # Redistribute the probabilities so that they sum up to 1.
+        probs_sort.div_(probs_sort.sum(dim=-1, keepdim=True))
+        # Sample a token (its index) from the top p distribution
+        next_token = torch.multinomial(probs_sort, num_samples=1)
+        # Get the token position in the vocabulary corresponding to the sampled index
+        next_token = torch.gather(probs_idx, -1, next_token)
+        return next_token
 
     def configure_optimizers(self):
         # Create optimizer
@@ -201,7 +206,6 @@ class PaliGemmaModule(L.LightningModule):
             weight_decay=self.weight_decay,
         )
 
-        # Create learning rate scheduler
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.trainer.estimated_stepping_batches
         )
@@ -231,15 +235,32 @@ class PaliGemmaModule(L.LightningModule):
             decoded_refs.append(refs)
         return decoded_refs
 
-    def _generate_captions(self, outputs):
+    def _generate_captions(self, input_ids, pixel_values, attention_mask):
+        """Generate captions for validation metrics"""
+        from aligntune.src.nn.gemma import KVCache
+
         # For simplicity, use greedy decoding during validation
         generated_captions = []
 
-        for i in range(outputs["logits"].shape[0]):
+        for i in range(len(input_ids)):
+            kv_cache = KVCache()
+            img_input_ids = input_ids[i : i + 1]
+            img_pixel_values = pixel_values[i : i + 1]
+            img_attention_mask = attention_mask[i : i + 1]
+
             stop_token = self.processor.tokenizer.eos_token_id
             generated_tokens = []
 
             for _ in range(self.max_tokens_to_generate):
+                with torch.no_grad():
+                    outputs = self.model(
+                        input_ids=img_input_ids,
+                        pixel_values=img_pixel_values,
+                        attention_mask=img_attention_mask,
+                        kv_cache=kv_cache,
+                    )
+
+                kv_cache = outputs["kv_cache"]
                 next_token_logits = outputs["logits"][:, -1, :]
 
                 if self.do_sample:

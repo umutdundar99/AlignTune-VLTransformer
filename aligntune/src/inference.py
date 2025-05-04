@@ -2,9 +2,8 @@ import os
 import torch
 import csv
 from PIL import Image
-from aligntune.utils.processor import PaliGemmaProcessor
+from aligntune.src.nn.processor_inference import PaliGemmaProcessor
 from aligntune.src.nn.gemma import KVCache, PaliGemmaForConditionalGeneration
-from aligntune.utils.load_model import load_hf_model
 from tqdm import tqdm
 
 
@@ -210,10 +209,53 @@ def batch_pg_inference(
     print("Processing complete.")
 
 
+from aligntune.src.nn.gemma import PaliGemmaForConditionalGeneration, PaliGemmaConfig
+from transformers import AutoTokenizer
+import json
+import glob
+from safetensors import safe_open
+from typing import Tuple
+
+
+def load_hf_model(
+    model_path: str, device: str
+) -> Tuple[PaliGemmaForConditionalGeneration, AutoTokenizer]:
+    # Load the tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="right")
+    assert tokenizer.padding_side == "right"
+
+    # Find all the *.safetensors files
+    safetensors_files = glob.glob(os.path.join(model_path, "*.safetensors"))
+
+    # ... and load them one by one in the tensors dictionary
+    tensors = {}
+    for safetensors_file in safetensors_files:
+        with safe_open(safetensors_file, framework="pt", device="cpu") as f:
+            for key in f.keys():
+                tensors[key] = f.get_tensor(key)
+
+    # Load the model's config
+    with open(os.path.join(model_path, "config.json"), "r") as f:
+        model_config_file = json.load(f)
+        config = PaliGemmaConfig(**model_config_file)
+
+    # Create the model using the configuration
+    model = PaliGemmaForConditionalGeneration(config).to(device, dtype=torch.float16)
+
+    # Load the state dict of the model
+    model.load_state_dict(tensors, strict=False)
+
+    # Tie weights
+    model.tie_weights()
+
+    return (model, tokenizer)
+
+
 if __name__ == "__main__":
     model_path = "/home/umutdundar/Desktop/repositories/align-tune/paligemma-3b-pt-224"
-    prompt = "Describe the image"
+    prompt = "describe the image in details"
     image_path = "aligntune/data/RISCM/resized/NWPU_0.jpg"
+    # image_path = "/home/umutdundar/Desktop/repositories/align-tune/images.jpg"
     max_tokens = 10
     temp = 0.8
     top_p = 0.9
@@ -226,6 +268,7 @@ if __name__ == "__main__":
     print("Device in use:", device)
     print("Loading model")
     model, tokenizer = load_hf_model(model_path, device)
+    model = model.half()
     model = model.to(device).eval()
 
     num_image_tokens = model.config.vision_config.num_image_tokens
@@ -234,18 +277,16 @@ if __name__ == "__main__":
 
     print("Running single inference")
 
-    captions = []
-    for _ in range(5):
-        caption = test_inference(
-            model=model,
-            processor=processor,
-            device=device,
-            prompt=prompt,
-            image_file_path=image_path,
-            max_tokens_to_generate=max_tokens,
-            temperature=0.2,
-            top_p=top_p,
-            do_sample=True,
-        )
-        captions.append(caption)
-    print("Generated captions:", captions)
+    caption = test_inference(
+        model=model,
+        processor=processor,
+        device=device,
+        prompt=prompt,
+        image_file_path=image_path,
+        max_tokens_to_generate=max_tokens,
+        temperature=0.2,
+        top_p=top_p,
+        do_sample=True,
+    )
+
+    print("Generated captions:", caption)

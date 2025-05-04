@@ -3,8 +3,8 @@ import numpy as np
 from PIL import Image
 import torch
 
-IMAGENET_STANDARD_MEAN = [0.48145466, 0.4578275, 0.40821073]
-IMAGENET_STANDARD_STD = [0.26862954, 0.26130258, 0.27577711]
+IMAGENET_STANDARD_MEAN = [0.5, 0.5, 0.5]
+IMAGENET_STANDARD_STD = [0.5, 0.5, 0.5]
 
 
 def add_image_tokens_to_prompt(prefix_prompt, bos_token, image_seq_len, image_token):
@@ -74,6 +74,7 @@ def process_images(
 
 
 class PaliGemmaProcessor:
+
     IMAGE_TOKEN = "<image>"
 
     def __init__(self, tokenizer, num_image_tokens: int, image_size: int):
@@ -106,9 +107,7 @@ class PaliGemmaProcessor:
         padding: str = "longest",
         truncation: bool = True,
     ) -> dict:
-        assert (
-            len(images) == 1 and len(text) == 1
-        ), f"Received {len(images)} images for {len(text)} prompts."
+        assert len(images) == 1 and len(text) == 1, f"Received {len(images)} images for {len(text)} prompts."
 
         pixel_values = process_images(
             images,
