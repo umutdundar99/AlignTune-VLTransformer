@@ -7,6 +7,7 @@ from aligntune.utils.processor import PaliGemmaProcessor
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from peft import LoraConfig, TaskType, get_peft_model
 from lightning.pytorch.loggers import WandbLogger
+from aligntune.src import lora_target_modules
 
 
 def train(
@@ -26,12 +27,12 @@ def train(
         raise RuntimeError("CUDA is not available. Please check your setup.")
 
     model = load_hf_model(model_path, device)
-    model = model.to(device).train()
+    #model = model.to(device).train()
     peft_config = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM,
-        r=16,
+        r=8,
         lora_alpha=32,
-        target_modules=["q_proj", "v_proj"],
+        target_modules=lora_target_modules,
         lora_dropout=0.1,
         bias="none",
         inference_mode=False,
@@ -44,7 +45,7 @@ def train(
     data_module = AlignTuneAnalysisDataModule(
         data_path="/home/umutdundar/Desktop/repositories/align-tune/aligntune/data/RISCM",
         batch_size=batch_size,
-        num_workers=1,
+        num_workers=12,
         processor=processor,
     )
     module = PaliGemmaModule(
