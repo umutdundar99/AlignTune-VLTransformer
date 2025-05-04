@@ -45,7 +45,7 @@ def train(
     data_module = AlignTuneAnalysisDataModule(
         data_path="/home/umutdundar/Desktop/repositories/align-tune/aligntune/data/RISCM",
         batch_size=batch_size,
-        num_workers=12,
+        num_workers=1,
         processor=processor,
     )
     module = PaliGemmaModule(

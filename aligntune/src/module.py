@@ -10,11 +10,11 @@ import torch.nn.functional as F
 from aligntune.src.nn.gemma import KVCache
 
 # Download necessary NLTK resources
-try:
-    nltk.download("wordnet")
-    nltk.download("punkt")
-except Exception as e:
-    print(f"NLTK download failed: {e}, but continuing...")
+# try:
+#     nltk.download("wordnet")
+#     nltk.download("punkt")
+# except Exception as e:
+#     print(f"NLTK download failed: {e}, but continuing...")
 
 
 class CIDErScore:
@@ -132,7 +132,7 @@ class PaliGemmaModule(L.LightningModule):
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             next_token = next_token.squeeze(0)
             generated_tokens.append(next_token)
-            input_ids = next_token.unsqueeze(-1)
+            input_ids = batch["labels"][0][token_idx].unsqueeze(-1).unsqueeze(0)
 
             attention_mask = torch.cat(
                 [attention_mask, torch.ones((1, 1), device=input_ids.device)], dim=-1
@@ -146,7 +146,7 @@ class PaliGemmaModule(L.LightningModule):
         print(
             "Actual prompt: ",
             self.processor.tokenizer.decode(
-                batch["input_ids"][0], skip_special_tokens=True
+                batch["labels"][0], skip_special_tokens=True
             ),
         )
         cum_loss = torch.cat(cum_loss, dim=-1)
