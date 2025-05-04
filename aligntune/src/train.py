@@ -58,7 +58,7 @@ def train(
     # Initialize the trainer
     trainer = L.Trainer(
         max_epochs=num_epochs,
-        accelerator="gpu",
+        accelerator="auto",
         precision=16,
         logger=WandbLogger(
             project="align-tune",
@@ -67,12 +67,12 @@ def train(
             offline=True,
         ),
         callbacks=[
-            ModelCheckpoint(
-                monitor="val/loss",
-                filename="best-checkpoint",
-                mode="min",
-                save_top_k=1,
-            ),
+            # ModelCheckpoint(
+            #     monitor="val/loss",
+            #     filename="best-checkpoint",
+            #     mode="min",
+            #     save_top_k=1,
+            # ),
             LearningRateMonitor(logging_interval="step"),
         ],
         enable_progress_bar=True,
