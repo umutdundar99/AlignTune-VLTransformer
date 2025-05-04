@@ -657,7 +657,7 @@ class PaliGemmaForConditionalGeneration(nn.Module):
         attention_mask = kwargs.get("attention_mask", None)
         kv_cache = kwargs.get("kv_cache", None)
         # Make sure the input is right-padded
-        assert torch.all(attention_mask == 1), "The input cannot be padded"
+        #assert torch.all(attention_mask == 1), "The input cannot be padded"
 
         # 1. Extra the input embeddings
         # shape: (Batch_Size, Seq_Len, Hidden_Size)

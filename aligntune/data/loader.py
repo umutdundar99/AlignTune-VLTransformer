@@ -5,12 +5,14 @@ from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 from aligntune.utils.processor import PaliGemmaProcessor
 import torch
+from aligntune.data.sampler import LengthGroupedSampler
 
 
 class AlignTuneDataset(Dataset):
-    prompt = "describe the image in details"
+    prompt = " describe the image in detail"
     patch_size = 14
     image_size = 224
+    caption_idx = 1
 
     def __init__(self, path: str, processor: PaliGemmaProcessor, task: str = "train"):
         self.data = pd.read_csv(os.path.join(path, "captions.csv"))
@@ -21,20 +23,7 @@ class AlignTuneDataset(Dataset):
         )
 
         self.task = task
-        self.data["caption"] = self.data["caption_1"]
-        self.data = self.data.drop(
-            columns=[
-                "image",
-                "split",
-                "source",
-                "caption_1",
-                "caption_2",
-                "caption_3",
-                "caption_4",
-                "caption_5",
-            ]
-        )
-
+        self.data = self.data.drop(columns=["image", "split", "source"])
         self.processor = processor
 
     def __len__(self):
@@ -43,22 +32,50 @@ class AlignTuneDataset(Dataset):
     def __getitem__(self, idx):
         image_path = os.path.join(self.data.iloc[idx]["image_path"])
         image = Image.open(image_path).convert("RGB")
-        prompt = self.data.iloc[idx]["caption"]
-        # Convert the image to a tensor
-        model_inputs = self.processor(
-            text=[self.prompt],
-            images=[image],
-            padding="False",
-            truncation=False,
-        )
-        labels = self.processor.tokenizer(
-            prompt,
-            return_tensors="pt",
+
+        target_caption = self.data.iloc[idx][f"caption_{self.caption_idx}"]
+
+        prompt_tokens = self.processor.tokenizer(
+            self.prompt,
+            add_special_tokens=False,
+        ).input_ids
+
+        caption_tokens = self.processor.tokenizer(
+            target_caption,
+            add_special_tokens=False,
             padding=False,
-            max_length=512,
             truncation=False,
+            max_length=512,
+        ).input_ids
+        
+        labels = ([-100] * (len(prompt_tokens) + 256)) + caption_tokens
+        labels = labels + [-100] * (512 - len(labels)) 
+
+
+        model_inputs = self.processor(
+            text=[self.prompt + target_caption],
+            images=[image],
+            padding=True,
+            truncation=True,
+            max_length=512,
         )
-        model_inputs["labels"] = labels.input_ids[0]
+        # if model_inputs["input_ids"] < 512, pad with -100
+        if len(model_inputs["input_ids"]) < 512:
+            #add two tensors one is after the other
+            model_inputs["input_ids"] = torch.cat(
+                (
+                    torch.tensor(model_inputs["input_ids"], dtype=torch.long),
+                    torch.full((512 - len(model_inputs["input_ids"]),), -100, dtype=torch.long),
+                )
+            )
+            
+        model_inputs["attention_mask"] = torch.tensor(
+            [1] * len(model_inputs["input_ids"]) + [0] * (512 - len(model_inputs["input_ids"])),
+            dtype=torch.long
+        )
+
+        model_inputs["labels"] = torch.tensor(labels, dtype=torch.long)
+
         return model_inputs
 
     def get_input_length(self, idx):
@@ -96,11 +113,14 @@ def custom_collate_fn(batch):
     keys = list(batch[0].keys())
     # remove labels from keys
     keys.remove("labels")
+    keys.remove("input_ids")
     for key in keys:
         result[key] = torch.stack([item[key] for item in batch])
 
     labels = [batch[i]["labels"] for i in range(len(batch))]
+    input_ids = [batch[i]["input_ids"] for i in range(len(batch))]
     result["labels"] = labels
+    result["input_ids"] = input_ids
 
     return result
 
@@ -148,8 +168,8 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             # pin_memory=True,
             num_workers=self.num_workers,
             shuffle=False,
-            collate_fn=custom_collate_fn,
-            # sampler=LengthGroupedSampler(self.train, self.batch_size),
+            # collate_fn=custom_collate_fn,
+            #sampler=LengthGroupedSampler(self.train, self.batch_size),
         )
 
     def val_dataloader(self):
@@ -165,8 +185,8 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             # pin_memory=True,
             num_workers=self.num_workers,
             shuffle=False,
-            collate_fn=custom_collate_fn,
-            # sampler=LengthGroupedSampler(self.val, self.batch_size),
+            # collate_fn=custom_collate_fn,
+            #sampler=LengthGroupedSampler(self.val, self.batch_size),
         )
 
     def test_dataloader(self):
@@ -183,6 +203,6 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             drop_last=True,
-            collate_fn=custom_collate_fn,
-            # sampler=LengthGroupedSampler(self.test, self.batch_size),
+            # collate_fn=custom_collate_fn,
+            #sampler=LengthGroupedSampler(self.test, self.batch_size),
         )

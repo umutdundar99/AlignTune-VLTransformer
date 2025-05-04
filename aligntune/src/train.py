@@ -11,7 +11,7 @@ from aligntune.src import lora_target_modules
 
 
 def train(
-    batch_size: int = 1,
+    batch_size: int = 2,
     num_epochs: int = 10,
     learning_rate: float = 1e-5,
     max_tokens: int = 100,
@@ -78,6 +78,7 @@ def train(
         enable_progress_bar=True,
         profiler="simple",
         log_every_n_steps=1,
+        accumulate_grad_batches=32,
     )
 
     # Train the model

@@ -76,9 +76,9 @@ class PaliGemmaProcessor:
         inputs = self.tokenizer(
             input_strings,
             return_tensors="pt",
-            padding=False,
-            truncation=False,
-            max_length=512,
+            padding="max_length",
+            truncation=truncation,
+            max_length=max_length,
         )
         return_data = {
             "pixel_values": pixel_values,
