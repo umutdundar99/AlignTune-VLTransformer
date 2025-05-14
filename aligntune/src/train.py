@@ -12,14 +12,14 @@ from aligntune.src import lora_target_modules
 
 def train(
     batch_size: int = 1,
-    num_epochs: int = 10,
-    learning_rate: float = 1e-5,
+    num_epochs: int = 20,
+    learning_rate: float = 1e-3,
     max_tokens: int = 100,
 ):
     """
     Main function to train the model using PyTorch Lightning.
     """
-    model_path = "/home/umutdundar/Desktop/repositories/align-tune/paligemma-3b-pt-224"
+    model_path = "paligemma-3b-pt-224"
 
     if torch.cuda.is_available():
         device = "cuda"
@@ -29,10 +29,13 @@ def train(
     model = load_hf_model(model_path, device)
     #model = model.to(device).train()
     peft_config = LoraConfig(
-        task_type=TaskType.SEQ_2_SEQ_LM,
+        task_type=TaskType.CAUSAL_LM,
         r=8,
         lora_alpha=32,
-        target_modules=lora_target_modules,
+        target_modules= [
+        "q_proj", "k_proj", "v_proj", "o_proj",  # Vision and LM attention
+        "out_proj" 
+    ],
         lora_dropout=0.1,
         bias="none",
         inference_mode=False,
@@ -43,7 +46,7 @@ def train(
     image_size = model.config.vision_config.image_size
     processor = PaliGemmaProcessor(model_path, num_image_tokens, image_size)
     data_module = AlignTuneAnalysisDataModule(
-        data_path="/home/umutdundar/Desktop/repositories/align-tune/aligntune/data/RISCM",
+        data_path="aligntune/data/RISCM",
         batch_size=batch_size,
         num_workers=1,
         processor=processor,
@@ -61,23 +64,24 @@ def train(
         accelerator="auto",
         precision=16,
         logger=WandbLogger(
-            project="align-tune",
+            project="aligntune",
             name="paligemma-3b-pt-224",
-            save_dir="/home/umutdundar/Desktop/repositories/align-tune/aligntune/logs",
-            offline=True,
+            save_dir="/home/umut_dundar/repositories/align-tune/aligntune/logs",
+            offline=False,
         ),
         callbacks=[
-            # ModelCheckpoint(
-            #     monitor="val/loss",
-            #     filename="best-checkpoint",
-            #     mode="min",
-            #     save_top_k=1,
-            # ),
+            ModelCheckpoint(
+                monitor="val/loss",
+                filename="best-checkpoint",
+                mode="min",
+                save_top_k=1,
+            ),
             LearningRateMonitor(logging_interval="step"),
         ],
         enable_progress_bar=True,
         profiler="simple",
-        log_every_n_steps=1,
+        log_every_n_steps=32,
+        accumulate_grad_batches=32,
     )
 
     # Train the model

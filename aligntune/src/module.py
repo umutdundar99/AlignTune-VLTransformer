@@ -1,7 +1,9 @@
 import torch
 import lightning as L
 import numpy as np
-from torchmetrics.text.rouge import ROUGEScore
+from torchmetrics.text import ROUGEScore, BLEUScore
+from pycocoevalcap.cider.cider import Cider
+
 from nltk.translate.bleu_score import SmoothingFunction
 import nltk
 from aligntune.src.nn.gemma import PaliGemmaForConditionalGeneration
@@ -9,76 +11,25 @@ from aligntune.utils.processor import PaliGemmaProcessor
 import torch.nn.functional as F
 from aligntune.src.nn.gemma import KVCache
 
-# Download necessary NLTK resources
-# try:
-#     nltk.download("wordnet")
-#     nltk.download("punkt")
-# except Exception as e:
-#     print(f"NLTK download failed: {e}, but continuing...")
 
-
-class CIDErScore:
+class CIDErWrapper:
     def __init__(self):
-        self.sigma = 6.0  # Default sigma value
+        self.cider = Cider()
 
-    def compute_score(self, references, candidates):
-        """
-        Compute CIDEr score between references and candidates
-        :param references: List of lists of reference captions
-        :param candidates: List of candidate captions
-        :return: CIDEr score (float)
-        """
-        assert len(references) == len(candidates)
-
-        scores = []
-        for i in range(len(candidates)):
-            score = self._compute_cider(references[i], candidates[i])
-            scores.append(score)
-
-        return np.mean(scores)
-
-    def _compute_cider(self, refs, hypo):
-        """Compute CIDEr for a single hypothesis and multiple references"""
-        # Tokenize
-        hypo_tokens = nltk.tokenize.word_tokenize(hypo.lower())
-        refs_tokens = [nltk.tokenize.word_tokenize(ref.lower()) for ref in refs]
-
-        # Calculate TF-IDF vectors
-        # This is simplified - a real implementation would handle document frequency properly
-        score = 0.0
-        for ref_tokens in refs_tokens:
-            n_grams_match = 0
-            for n in range(1, 5):  # Compute for 1 to 4-grams
-                hypo_ngrams = self._get_ngrams(hypo_tokens, n)
-                ref_ngrams = self._get_ngrams(ref_tokens, n)
-
-                # Count matching n-grams
-                for ngram in hypo_ngrams:
-                    if ngram in ref_ngrams:
-                        n_grams_match += 1
-
-            # Simple similarity score based on matching n-grams
-            if len(hypo_tokens) > 0 and len(ref_tokens) > 0:
-                precision = n_grams_match / max(1, len(hypo_tokens))
-                recall = n_grams_match / max(1, len(ref_tokens))
-                f1 = 2 * precision * recall / max(1e-8, precision + recall)
-                score += f1
-
-        # Average over references
-        score /= max(1, len(refs_tokens))
+    def __call__(self, predictions, references):
+        gts = {i: [ref] for i, ref in enumerate(references)}
+        res = {i: [pred] for i, pred in enumerate(predictions)}
+        score, _ = self.cider.compute_score(gts, res)
         return score
 
-    def _get_ngrams(self, tokens, n):
-        """Get n-grams from tokens"""
-        return set(tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1))
-
+cider_metric = CIDErWrapper()
 
 class PaliGemmaModule(L.LightningModule):
     def __init__(
         self,
         model: PaliGemmaForConditionalGeneration,
         processor: PaliGemmaProcessor,
-        learning_rate: float = 1e-5,
+        learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
         max_tokens_to_generate: int = 100,
         temperature: float = 0.7,
@@ -100,85 +51,104 @@ class PaliGemmaModule(L.LightningModule):
 
         # Initialize metrics
         self.rouge = ROUGEScore()
-        self.cider = CIDErScore()
+        self.bleu = BLEUScore()
         self.smooth = SmoothingFunction().method1
 
         # Save hyperparameters
         self.save_hyperparameters(ignore=["model", "processor"])
 
+
     def forward(self, batch):
-        input_ids = batch["input_ids"]
-        attention_mask = batch["attention_mask"]
-        pixel_values = batch["pixel_values"]
+        input_ids = batch["input_ids"]              # [B, T]
+        attention_mask = batch["attention_mask"]    # [B, T]
+        pixel_values = batch["pixel_values"]        # [B, C, H, W]
+        labels = batch["labels"]                    # [B, L]
 
-        cum_loss = []
+        batch_size = input_ids.size(0)
+        seq_len = labels.size(1)
         generated_tokens = []
-        kv_cache = KVCache()
+        cum_loss = []
 
-        for token_idx in range(len(batch["labels"][0])):
+        for token_idx in range(seq_len):
             outputs = self.model(
                 input_ids=input_ids,
                 pixel_values=pixel_values,
                 attention_mask=attention_mask,
-                kv_cache=kv_cache,
             )
-            kv_cache = outputs["kv_cache"]
-            next_token_logits = outputs["logits"][:, -1, :]
+            next_token_logits = outputs["logits"][:, -1, :]  # [B, V]
+            target_token = labels[:, token_idx]               # [B]
+            loss = F.cross_entropy(next_token_logits, target_token, ignore_index=-100)
+            cum_loss.append(loss.unsqueeze(0))
 
-            loss = self.criterion(
-                next_token_logits, batch["labels"][0][token_idx].unsqueeze(0)
-            )
-            cum_loss.append(loss)
-            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            next_token = next_token.squeeze(0)
+            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)  # [B, 1]
             generated_tokens.append(next_token)
-            input_ids = batch["labels"][0][token_idx].unsqueeze(-1).unsqueeze(0)
 
-            attention_mask = torch.cat(
-                [attention_mask, torch.ones((1, 1), device=input_ids.device)], dim=-1
-            )
+            input_ids = torch.cat([input_ids, next_token], dim=1)
+            attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 
-        generated_tokens = torch.cat(generated_tokens, dim=-1)
-        print(
-            "Generated prompt: ",
-            self.processor.tokenizer.decode(generated_tokens, skip_special_tokens=True),
-        )
-        print(
-            "Actual prompt: ",
-            self.processor.tokenizer.decode(
-                batch["labels"][0], skip_special_tokens=True
-            ),
-        )
-        cum_loss = torch.cat(cum_loss, dim=-1)
-        return cum_loss.mean(), generated_tokens
+        cum_loss = torch.cat(cum_loss, dim=0).mean()
+        generated_tokens = torch.cat(generated_tokens, dim=1)  # [B, L]
+        return cum_loss, generated_tokens
+
 
     def training_step(self, batch, batch_idx):
-        loss, generated_prompt = self(batch)
-        # self._generate_captions({"logits": outputs["logits"][0].unsqueeze(0)})
+        loss, generated_tokens = self(batch)
 
-        self.log(
-            "train_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            batch_size=batch["input_ids"].size(0),
-        )
+        generated_captions = [
+            self.processor.tokenizer.decode(g, skip_special_tokens=True)
+            for g in generated_tokens
+        ]
+        actual_captions = [
+        self.processor.tokenizer.decode(seq[seq != -100], skip_special_tokens=True)
+        for seq in batch["labels"]
+        ]
+
+        cider_score = cider_metric(generated_captions, actual_captions)
+        rouge_scores = ROUGEScore()(generated_captions, actual_captions)
+        bleu_score = BLEUScore()(generated_captions, actual_captions)
+
+        self.log_dict({
+            "train/loss": loss,
+            "train/cider": cider_score,
+            "train/rouge1": rouge_scores['rouge1_fmeasure'],
+            "train/rouge2": rouge_scores['rouge2_fmeasure'],
+            "train/rougeL": rouge_scores['rougeL_fmeasure'],
+            "train/bleu": bleu_score
+        }, on_step=True, on_epoch=True, prog_bar=True)
+
         return loss
+
 
     def validation_step(self, batch, batch_idx):
-        loss, generated_prompt = self(batch)
-        # self._generate_captions({"logits": outputs["logits"][0].unsqueeze(0)})
+        loss, generated_tokens = self(batch)
 
-        self.log(
-            "val_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            batch_size=batch["input_ids"].size(0),
-        )
+
+        generated_captions = [
+            self.processor.tokenizer.decode(g, skip_special_tokens=True)
+            for g in generated_tokens
+        ]
+        # from all tensors, remove -100 values
+        # and convert to text
+        actual_captions = [
+        self.processor.tokenizer.decode(seq[seq != -100], skip_special_tokens=True)
+        for seq in batch["labels"]
+        ]
+
+        cider_score = cider_metric(generated_captions, actual_captions)
+        rouge_scores = ROUGEScore()(generated_captions, actual_captions)
+        bleu_score = BLEUScore()(generated_captions, actual_captions)
+
+        self.log_dict({
+            "val/loss": loss,
+            "val/cider": cider_score,
+            "val/rouge1": rouge_scores['rouge1_fmeasure'],
+            "val/rouge2": rouge_scores['rouge2_fmeasure'],
+            "val/rougeL": rouge_scores['rougeL_fmeasure'],
+            "val/bleu": bleu_score
+        }, on_step=True, on_epoch=True, prog_bar=True)
+
         return loss
+
 
     def _sample_top_p(self, probs: torch.Tensor, p: float):
         # (B, vocab_size)

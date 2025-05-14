@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 from aligntune.utils.processor import PaliGemmaProcessor
 import torch
+from torch.nn.utils.rnn import pad_sequence
 
 
 class AlignTuneDataset(Dataset):
@@ -34,7 +35,8 @@ class AlignTuneDataset(Dataset):
                 "caption_5",
             ]
         )
-
+        #use only %30 of the data
+        self.data = self.data.sample(frac=0.3, random_state=42)
         self.processor = processor
 
     def __len__(self):
@@ -91,17 +93,15 @@ class AlignTuneDataset(Dataset):
 
 
 def custom_collate_fn(batch):
-    """Custom collate function to handle different sized tensors."""
     result = {}
     keys = list(batch[0].keys())
-    # remove labels from keys
     keys.remove("labels")
     for key in keys:
         result[key] = torch.stack([item[key] for item in batch])
 
-    labels = [batch[i]["labels"] for i in range(len(batch))]
+    labels = [item["labels"] for item in batch]
+    labels = pad_sequence(labels, batch_first=True, padding_value=-100)
     result["labels"] = labels
-
     return result
 
 
