@@ -173,6 +173,4 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Data
-RISCM
-paligemma-3b-pt-224
+

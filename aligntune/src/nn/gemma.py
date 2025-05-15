@@ -318,7 +318,7 @@ class GemmaAttention(nn.Module):
         # Apply the softmax
         # [Batch_Size, Num_Heads_Q, Seq_Len_Q, Seq_Len_KV]
         attn_weights = nn.functional.softmax(
-            attn_weights, dim=-1, dtype=torch.float32
+            attn_weights, dim=-1, dtype=torch.float16
         ).to(query_states.dtype)
         # Apply the dropout
         attn_weights = nn.functional.dropout(
@@ -360,7 +360,7 @@ class GemmaDecoderLayer(nn.Module):
 
         self.mlp = GemmaMLP(config)
         self.input_layernorm = GemmaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.adapter = Adapter(config.hidden_size, bottleneck_dim=256)
+        self.adapter = Adapter(config.hidden_size, bottleneck_dim=8192)
         self.post_attention_layernorm = GemmaRMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
@@ -391,7 +391,7 @@ class GemmaDecoderLayer(nn.Module):
         # [Batch_Size, Seq_Len, Hidden_Size]
         
         hidden_states = residual + self.adapter(hidden_states)
-
+        #hidden_states= residual + hidden_states
         # [Batch_Size, Seq_Len, Hidden_Size]
         residual = hidden_states
         # [Batch_Size, Seq_Len, Hidden_Size]
@@ -580,7 +580,7 @@ class PaliGemmaForConditionalGeneration(nn.Module):
         batch_size, sequence_length = input_ids.shape
         dtype, device = inputs_embeds.dtype, inputs_embeds.device
         # Shape: [Batch_Size, Seq_Len, Hidden_Size]
-        scaled_image_features = image_features / (self.config.hidden_size**0.5)
+        scaled_image_features = (image_features / (self.config.hidden_size**0.5)).float()
 
         # Combine the embeddings of the image tokens, the text tokens and mask out all the padding tokens.
         final_embedding = torch.zeros(

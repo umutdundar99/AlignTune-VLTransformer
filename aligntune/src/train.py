@@ -27,20 +27,26 @@ def train(
         raise RuntimeError("CUDA is not available. Please check your setup.")
 
     model = load_hf_model(model_path, device)
-    #model = model.to(device).train()
-    # peft_config = LoraConfig(
-    #     task_type=TaskType.CAUSAL_LM,
-    #     r=8,
-    #     lora_alpha=32,
-    #     target_modules= [
-    #     "q_proj", "k_proj", "v_proj", "o_proj",  # Vision and LM attention
-    #     "out_proj" 
-    # ],
-    #     lora_dropout=0.1,
-    #     bias="none",
-    #     inference_mode=False,
-    # )
-    # model = get_peft_model(model, peft_config)
+    model = model.to(device=device).train()
+    peft_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=8,
+        lora_alpha=32,
+        target_modules= [
+        "q_proj", "k_proj", "v_proj", "o_proj",  # Vision and LM attention
+        "out_proj" 
+    ],
+        lora_dropout=0.1,
+        bias="none",
+        inference_mode=False,
+    )
+    model = get_peft_model(model, peft_config)
+    # for name, param in model.named_parameters():
+    #     if "adapter" not in name:
+    #         param.requires_grad = False
+    #     else:
+    #         print("adapter")
+
 
     num_image_tokens = model.config.vision_config.num_image_tokens
     image_size = model.config.vision_config.image_size
@@ -61,8 +67,9 @@ def train(
     # Initialize the trainer
     trainer = L.Trainer(
         max_epochs=num_epochs,
-        accelerator="auto",
-        precision=16,
+        #accelerator="auto",
+        accelerator="gpu",
+        precision="16-mixed",
         logger=WandbLogger(
             project="aligntune",
             name="paligemma-3b-pt-224",
@@ -79,9 +86,10 @@ def train(
             LearningRateMonitor(logging_interval="step"),
         ],
         enable_progress_bar=True,
-        profiler="simple",
         log_every_n_steps=32,
-        accumulate_grad_batches=32,
+        gradient_clip_val=0.0,
+        #accumulate_grad_batches=32,
+        
     )
 
     # Train the model

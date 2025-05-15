@@ -10,6 +10,7 @@ from aligntune.src.nn.gemma import PaliGemmaForConditionalGeneration
 from aligntune.utils.processor import PaliGemmaProcessor
 import torch.nn.functional as F
 from aligntune.src.nn.gemma import KVCache
+from aligntune.src.nn.gemma import GemmaRMSNorm
 
 
 class CIDErWrapper:
@@ -37,7 +38,7 @@ class PaliGemmaModule(L.LightningModule):
         do_sample: bool = True,
     ):
         super().__init__()
-        self.model = model
+        self.model =model#.to(dtype=torch.float16)
         self.processor = processor
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -47,16 +48,21 @@ class PaliGemmaModule(L.LightningModule):
         self.do_sample = do_sample
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="none")
         self.do_sample = True
+
+        # for param in model.vision_tower.parameters():
+        #     param.requires_grad = False
+        # for param in model.multi_modal_projector.parameters():
+        #      param.requires_grad = False
+
         for name, param in self.model.named_parameters():
             if "adapter" not in name:
                 param.requires_grad = False
-        
-        model.language_model.model.layers = torch.nn.ModuleList(
-            list(model.language_model.model.layers[:2])  # örneğin ilk 12 katmanı kullan
-        )
+            else:
+                print("adapter")
+
         # gradient checkpointing
-        for layer in model.language_model.model.layers:
-            layer.gradient_checkpointing = True
+        # for layer in model.language_model.model.layers:
+        #     layer.gradient_checkpointing = True
 
         # Initialize metrics
         self.rouge = ROUGEScore()
@@ -66,6 +72,23 @@ class PaliGemmaModule(L.LightningModule):
         # Save hyperparameters
         self.save_hyperparameters(ignore=["model", "processor"])
 
+    def apply_bitfit(model: torch.nn.Module):
+        """
+        Freezes all parameters except biases in the given model.
+        After calling this, only nn.Linear and nn.LayerNorm bias terms
+        (i.e. parameters named 'bias' or weight terms in LayerNorm if desired)
+        will have requires_grad=True.
+        """
+        for name, param in model.named_parameters():
+            # default: dondur
+            param.requires_grad = False
+            # bias is trainable
+            if name.endswith(".bias"):
+                param.requires_grad = True
+
+        for module in model.modules():
+            if isinstance(module, GemmaRMSNorm):
+                module.weight.requires_grad = True
 
     def forward(self, batch):
         input_ids = batch["input_ids"]              # [B, T]
