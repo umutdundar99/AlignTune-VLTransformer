@@ -46,8 +46,17 @@ class PaliGemmaModule(L.LightningModule):
         self.top_p = top_p
         self.do_sample = do_sample
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="none")
-
         self.do_sample = True
+        for name, param in self.model.named_parameters():
+            if "adapter" not in name:
+                param.requires_grad = False
+        
+        model.language_model.model.layers = torch.nn.ModuleList(
+            list(model.language_model.model.layers[:2])  # örneğin ilk 12 katmanı kullan
+        )
+        # gradient checkpointing
+        for layer in model.language_model.model.layers:
+            layer.gradient_checkpointing = True
 
         # Initialize metrics
         self.rouge = ROUGEScore()

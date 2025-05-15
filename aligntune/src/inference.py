@@ -252,7 +252,7 @@ def load_hf_model(
 
 
 if __name__ == "__main__":
-    model_path = "/home/umutdundar/Desktop/repositories/align-tune/paligemma-3b-pt-224"
+    model_path = "paligemma-3b-pt-224"
     prompt = "describe the image in details"
     image_path = "aligntune/data/RISCM/resized/NWPU_0.jpg"
     # image_path = "/home/umutdundar/Desktop/repositories/align-tune/images.jpg"
@@ -268,8 +268,11 @@ if __name__ == "__main__":
     print("Device in use:", device)
     print("Loading model")
     model, tokenizer = load_hf_model(model_path, device)
-    model = model.half()
+    # model = model.half()
     model = model.to(device).eval()
+    # model.language_model.model.layers = torch.nn.ModuleList(
+    #         list(model.language_model.model.layers[:2])  # örneğin ilk 12 katmanı kullan
+    #     )
 
     num_image_tokens = model.config.vision_config.num_image_tokens
     image_size = model.config.vision_config.image_size

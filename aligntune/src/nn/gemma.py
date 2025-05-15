@@ -340,7 +340,16 @@ class GemmaAttention(nn.Module):
         attn_output = self.o_proj(attn_output)
 
         return attn_output, attn_weights
+    
+class Adapter(nn.Module):
+    def __init__(self, hidden_size: int, bottleneck_dim: int = 256):
+        super().__init__()
+        self.down_proj = nn.Linear(hidden_size, bottleneck_dim)
+        self.activation = nn.ReLU()
+        self.up_proj = nn.Linear(bottleneck_dim, hidden_size)
 
+    def forward(self, x):
+        return self.up_proj(self.activation(self.down_proj(x)))
 
 class GemmaDecoderLayer(nn.Module):
     def __init__(self, config: GemmaConfig, layer_idx: int):
@@ -351,6 +360,7 @@ class GemmaDecoderLayer(nn.Module):
 
         self.mlp = GemmaMLP(config)
         self.input_layernorm = GemmaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.adapter = Adapter(config.hidden_size, bottleneck_dim=256)
         self.post_attention_layernorm = GemmaRMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
@@ -379,7 +389,8 @@ class GemmaDecoderLayer(nn.Module):
             kv_cache=kv_cache,
         )
         # [Batch_Size, Seq_Len, Hidden_Size]
-        hidden_states = residual + hidden_states
+        
+        hidden_states = residual + self.adapter(hidden_states)
 
         # [Batch_Size, Seq_Len, Hidden_Size]
         residual = hidden_states

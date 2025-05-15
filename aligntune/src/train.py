@@ -28,19 +28,19 @@ def train(
 
     model = load_hf_model(model_path, device)
     #model = model.to(device).train()
-    peft_config = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        r=8,
-        lora_alpha=32,
-        target_modules= [
-        "q_proj", "k_proj", "v_proj", "o_proj",  # Vision and LM attention
-        "out_proj" 
-    ],
-        lora_dropout=0.1,
-        bias="none",
-        inference_mode=False,
-    )
-    model = get_peft_model(model, peft_config)
+    # peft_config = LoraConfig(
+    #     task_type=TaskType.CAUSAL_LM,
+    #     r=8,
+    #     lora_alpha=32,
+    #     target_modules= [
+    #     "q_proj", "k_proj", "v_proj", "o_proj",  # Vision and LM attention
+    #     "out_proj" 
+    # ],
+    #     lora_dropout=0.1,
+    #     bias="none",
+    #     inference_mode=False,
+    # )
+    # model = get_peft_model(model, peft_config)
 
     num_image_tokens = model.config.vision_config.num_image_tokens
     image_size = model.config.vision_config.image_size
@@ -67,7 +67,7 @@ def train(
             project="aligntune",
             name="paligemma-3b-pt-224",
             save_dir="/home/umut_dundar/repositories/align-tune/aligntune/logs",
-            offline=False,
+            offline=True,
         ),
         callbacks=[
             ModelCheckpoint(
