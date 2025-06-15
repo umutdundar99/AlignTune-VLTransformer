@@ -174,5 +174,4 @@ cython_debug/
 .pypirc
 
 paligemma-3b-pt-224
-aligntune/data/RISCM
 logs*
