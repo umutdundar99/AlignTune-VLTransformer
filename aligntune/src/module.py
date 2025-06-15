@@ -1,6 +1,6 @@
 import torch
 import lightning as L
-from torchmetrics.text import ROUGEScore, BLEUScore
+from torchmetrics.text import ROUGEScore
 from pycocoevalcap.cider.cider import Cider
 from transformers import PaliGemmaForConditionalGeneration
 from nltk.translate.bleu_score import SmoothingFunction
@@ -40,8 +40,8 @@ class PaliGemmaModule(L.LightningModule):
         self.temperature = temperature
         self.top_p = top_p
         self.rouge = ROUGEScore()
-        self.CIDEr= CIDErWrapper()
-        
+        self.CIDEr = CIDErWrapper()
+
         self.smooth = SmoothingFunction().method1
         self.save_hyperparameters(ignore=["model", "processor"])
         self.df = pd.DataFrame(columns=["generated", "actual"])

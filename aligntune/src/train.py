@@ -17,6 +17,7 @@ def train(
     num_epochs: int = 5,
     learning_rate: float = 2e-5,
     max_tokens: int = 255,
+    **kwargs: dict,
 ):
     """
     Main function to train the model using PyTorch Lightning.
@@ -66,18 +67,23 @@ def train(
         weight_decay=1e-6,
     )
 
-    # Initialize the trainer
+    if kwargs.get("log_wandb", False):
+        logger = (
+            WandbLogger(
+                project=kwargs.get("project_name", "aligntune"),
+                name=kwargs.get("run_name", "paligemma-3b-pt-224"),
+                save_dir="aligntune/logs",
+                offline=kwargs.get("offline", False),
+                log_model="all" if kwargs.get("log_model", False) else None,
+            ),
+        )
+    else:
+        logger = None
     trainer = L.Trainer(
         max_epochs=num_epochs,
         accelerator="auto",
         precision="16-mixed",
-        logger=WandbLogger(
-            project="aligntune",
-            name="paligemma-3b-pt-224-cleaned_all_data_r8_replace4",
-            save_dir="/home/umut_dundar/repositories/align-tune/aligntune/logs",
-            offline=False,
-            log_model="all",
-        ),
+        logger=logger,
         callbacks=[
             ModelCheckpoint(
                 filename="checkpoint-{epoch:02d}-{step}",

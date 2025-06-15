@@ -1,13 +1,15 @@
 import pandas as pd
 
-def remove_duplicates(cleaned_data):
-    data_train = cleaned_data[cleaned_data['split'] == 'train'].copy()
-    val_captions = set(cleaned_data[cleaned_data['split'] == 'val']['caption'])
-    test_captions = set(cleaned_data[cleaned_data['split'] == 'test']['caption'])
 
-    cleaned_data = data_train[~data_train['caption'].isin(val_captions | test_captions)]
+def remove_duplicates(cleaned_data):
+    data_train = cleaned_data[cleaned_data["split"] == "train"].copy()
+    val_captions = set(cleaned_data[cleaned_data["split"] == "val"]["caption"])
+    test_captions = set(cleaned_data[cleaned_data["split"] == "test"]["caption"])
+
+    cleaned_data = data_train[~data_train["caption"].isin(val_captions | test_captions)]
 
     return cleaned_data
+
 
 data = pd.read_csv("aligntune/data/RISCM/captions.csv")
 

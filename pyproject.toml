@@ -12,7 +12,7 @@ dependencies = [
 "lightning >= 2.2.1",
 "wandb >= 0.16.4",
 "pandas >= 2.2.1",
-"numpy >= 1.26.4",
+"numpy >= 2.1.3",
 "typer >= 0.4.0",
 "pillow >= 10.0.0",
 "torchvision >= 0.16.1",
@@ -21,10 +21,14 @@ dependencies = [
 "pillow >= 9.0.0",
 "tqdm >= 4.64.0",
 "safetensors >= 0.3.0",
-"transformers >= 4.37.0",
 "nltk >= 3.8.1",
 "peft >= 0.4.0",
 "wordcloud >= 1.9.4",
+"pycocoevalcap >= 1.2",
+"bitsandbytes == 0.45.5",
+"seaborn",
+"matplotlib",
+"transformers == 4.51.3",
 ]
 
 
