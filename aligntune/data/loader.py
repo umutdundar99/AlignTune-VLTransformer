@@ -16,7 +16,7 @@ processor = AutoProcessor.from_pretrained("paligemma-3b-pt-224")
 nltk.download("wordnet")
 nltk.download("averaged_perceptron_tagger_eng")
 possible_prompts = [
-    "<image> <bos> describe this image."
+    "<image> <bos> describe this image.",
     # "<image> <bos> describe this image in detail.",
     # "<image> <bos> give a detailed description of this image.",
     # "<image> <bos> provide a detailed description of this image.",

@@ -19,9 +19,6 @@ class CIDErWrapper:
         return score
 
 
-cider_metric = CIDErWrapper()
-
-
 class PaliGemmaModule(L.LightningModule):
     def __init__(
         self,
@@ -43,7 +40,8 @@ class PaliGemmaModule(L.LightningModule):
         self.temperature = temperature
         self.top_p = top_p
         self.rouge = ROUGEScore()
-        self.bleu = BLEUScore()
+        self.CIDEr= CIDErWrapper()
+        
         self.smooth = SmoothingFunction().method1
         self.save_hyperparameters(ignore=["model", "processor"])
         self.df = pd.DataFrame(columns=["generated", "actual"])
@@ -70,8 +68,8 @@ class PaliGemmaModule(L.LightningModule):
             for seq in batch["labels"]
         ]
 
-        cider_score = cider_metric(generated_captions, actual_captions)
-        rouge_scores = ROUGEScore()(generated_captions, actual_captions)
+        cider_score = self.CIDEr(generated_captions, actual_captions)
+        rouge_scores = self.rouge(generated_captions, actual_captions)
 
         self.log_dict(
             {
@@ -109,8 +107,8 @@ class PaliGemmaModule(L.LightningModule):
             ignore_index=True,
         )
 
-        cider_score = cider_metric(generated_captions, actual_captions)
-        rouge_scores = ROUGEScore()(generated_captions, actual_captions)
+        cider_score = self.CIDEr(generated_captions, actual_captions)
+        rouge_scores = self.rouge(generated_captions, actual_captions)
 
         self.log_dict(
             {
