@@ -1,6 +1,6 @@
 [project]
 name = "align-tune"
-description = "AlignTune: Enhancing Image Captioning via Auxiliary Contrastive Alignment."
+description = "AlignTune: Enhancing Image Captioning via Text Data Augmentation."
 authors = [{"name" = "Umut DUNDAR", "email" = "dundar.umut@metu.edu.tr"}]
 license = "MIT"
 dynamic = ["version", "readme"]
@@ -31,7 +31,7 @@ dependencies = [
 dev = ["pre-commit", "mypy", "setuptools", "wheel", "build", "pytest"]
 
 # [project.scripts]
-# align_tune = "align_tune.__init__:cli"
+# align_tune = "align_tune.__main__"
 
 [tool.setuptools.dynamic]
 readme = { file = "README.md" }

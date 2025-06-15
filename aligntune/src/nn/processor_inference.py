@@ -19,7 +19,7 @@ def add_image_tokens_to_prompt(prefix_prompt, bos_token, image_seq_len, image_to
 
 
 def rescale(
-    image: np.ndarray, scale: float, dtype: np.dtype = np.float32
+    image: np.ndarray, scale: float, dtype: np.dtype = np.float16
 ) -> np.ndarray:
     rescaled_image = image * scale
     rescaled_image = rescaled_image.astype(dtype)

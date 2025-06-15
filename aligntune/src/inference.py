@@ -6,6 +6,13 @@ from aligntune.src.nn.processor_inference import PaliGemmaProcessor
 from aligntune.src.nn.gemma import KVCache, PaliGemmaForConditionalGeneration
 from tqdm import tqdm
 
+from aligntune.src.nn.gemma import PaliGemmaConfig
+from transformers import AutoTokenizer
+import json
+import glob
+from safetensors import safe_open
+from typing import Tuple
+
 
 def move_inputs_to_device(model_inputs: dict, device: str):
     model_inputs = {k: v.to(device) for k, v in model_inputs.items()}
@@ -70,7 +77,7 @@ def test_inference(
         if next_token.item() == stop_token:
             break
         # Append the next token to the input
-        input_ids = torch.cat([input_ids, next_token.unsqueeze(-1)], dim=-1)
+        input_ids = next_token.unsqueeze(-1)
         attention_mask = torch.cat(
             [attention_mask, torch.ones((1, 1), device=input_ids.device)], dim=-1
         )
@@ -209,14 +216,6 @@ def batch_pg_inference(
     print("Processing complete.")
 
 
-from aligntune.src.nn.gemma import PaliGemmaForConditionalGeneration, PaliGemmaConfig
-from transformers import AutoTokenizer
-import json
-import glob
-from safetensors import safe_open
-from typing import Tuple
-
-
 def load_hf_model(
     model_path: str, device: str
 ) -> Tuple[PaliGemmaForConditionalGeneration, AutoTokenizer]:
@@ -270,9 +269,6 @@ if __name__ == "__main__":
     model, tokenizer = load_hf_model(model_path, device)
     # model = model.half()
     model = model.to(device).eval()
-    # model.language_model.model.layers = torch.nn.ModuleList(
-    #         list(model.language_model.model.layers[:2])  # örneğin ilk 12 katmanı kullan
-    #     )
 
     num_image_tokens = model.config.vision_config.num_image_tokens
     image_size = model.config.vision_config.image_size

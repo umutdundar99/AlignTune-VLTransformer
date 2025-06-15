@@ -4,8 +4,8 @@ import json
 import glob
 from safetensors import safe_open
 from typing import Tuple
-import torch
 import os
+import torch
 
 
 def load_hf_model(
@@ -27,7 +27,7 @@ def load_hf_model(
         config = PaliGemmaConfig(**model_config_file)
 
     # Create the model using the configuration
-    model = PaliGemmaForConditionalGeneration(config).to(device)
+    model = PaliGemmaForConditionalGeneration(config).to(device, dtype=torch.float16)
 
     # Load the state dict of the model
     model.load_state_dict(tensors, strict=False)

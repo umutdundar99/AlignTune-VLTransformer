@@ -95,7 +95,7 @@ class PaliGemmaProcessor:
         return f"{image_token * image_seq_len}{bos_token}{prefix_prompt}\n"
 
     def rescale(
-        self, image: np.ndarray, scale: float, dtype: np.dtype = np.float32
+        self, image: np.ndarray, scale: float, dtype: np.dtype = np.float16
     ) -> np.ndarray:
         rescaled_image = image * scale
         rescaled_image = rescaled_image.astype(dtype)
