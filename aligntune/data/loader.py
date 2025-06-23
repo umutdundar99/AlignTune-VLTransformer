@@ -161,6 +161,7 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             collate_fn=custom_collate_fn,
+            
         )
 
     def val_dataloader(self):
@@ -176,6 +177,7 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             collate_fn=custom_collate_fn,
+            
         )
 
     def test_dataloader(self):

@@ -40,11 +40,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate", type=float, default=2e-5, help="Learning rate for training"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(["--batch_size", "8", 
+                              "--num_epochs", "15",
+                              "--log_wandb", 
+                              "--project_name", "aligntune", 
+                              "--run_name", "paligemma-3b-pt-224-cleaned_r8_replace2-15epochs", 
+                              "--learning_rate", "1e-5"])
+   
+    args = vars(args)
 
-    train(
-        batch_size=args.batch_size,
-        num_epochs=args.num_epochs,
-        learning_rate=args.learning_rate,
-        log_wandb=args.log_wandb,
-    )
+    train(args)

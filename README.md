@@ -64,7 +64,7 @@ aligntune/
         └── resized/                # Corresponding preprocessed/resized images
 ```
 
-The training loader expects `captions_cleaned.csv` to be aligned with images in the `resized/` directory. Caption augmentation is applied to this cleaned version of the data. Please run data/cleaned_data.py to generate `captions_cleaned.csv`
+The training loader expects `captions_cleaned.csv` to be aligned with images in the `resized/` directory. Caption augmentation is applied to this cleaned version of the data. Please [data cleaning script](aligntune/data/clean_data.py) to generate `captions_cleaned.csv`
 
 
 ## Requirements
