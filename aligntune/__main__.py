@@ -1,12 +1,11 @@
 from aligntune.src.train import train
+from aligntune.src.test import test
 import os
 import argparse
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 if __name__ == "__main__":
-    # get if need logger, if it is yes, get project,name,offline, inputs
-
     parser = argparse.ArgumentParser(description="Train a model with AlignTune")
     parser.add_argument(
         "--batch_size", type=int, default=8, help="Batch size for training"
@@ -34,19 +33,45 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--offline",
-        action="store_true",
-        help="Run Weights & Biases in offline mode",
+        type=bool,
+        default=True,
     )
     parser.add_argument(
         "--learning_rate", type=float, default=2e-5, help="Learning rate for training"
     )
-    args = parser.parse_args(["--batch_size", "8", 
-                              "--num_epochs", "15",
-                              "--log_wandb", 
-                              "--project_name", "aligntune", 
-                              "--run_name", "paligemma-3b-pt-224-cleaned_r8_replace2-15epochs", 
-                              "--learning_rate", "1e-5"])
-   
+    parser.add_argument(
+        "--test",
+        type=bool,
+        default=False,
+        help="Run in test mode (load a checkpoint and evaluate)",
+    )
+    parser.add_argument(
+        "--test-checkpoint",
+        type=str,
+        default=None,
+        help="Path to the checkpoint for testing",
+    )
+    args = parser.parse_args(
+        [
+            "--log_wandb",
+            "--project_name",
+            "aligntune",
+            "--run_name",
+            "zvk8ks4u-test-lastckpt-withbleu",
+            "--learning_rate",
+            "1e-5",
+            "--offline",
+            False,
+            "--test",
+            "True",
+            "--test-checkpoint",
+            "aligntune/logs/aligntune/zvk8ks4u/checkpoints/last.ckpt",
+        ]
+    )
+
     args = vars(args)
 
-    train(args)
+    if not args["test"]:
+        train(args)
+    else:
+        test(args)

@@ -3,7 +3,6 @@ import torch
 from aligntune.data.loader import AlignTuneAnalysisDataModule
 from aligntune.src.module import PaliGemmaModule
 from transformers import AutoProcessor
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from peft import LoraConfig, get_peft_model
 from lightning.pytorch.loggers import WandbLogger
 from transformers import PaliGemmaForConditionalGeneration
@@ -12,7 +11,7 @@ from transformers import BitsAndBytesConfig
 REPO_ID = "paligemma-3b-pt-224"
 
 
-def train(
+def test(
     args,
 ):
     """
@@ -50,10 +49,10 @@ def train(
     processor = AutoProcessor.from_pretrained(REPO_ID)
     data_module = AlignTuneAnalysisDataModule(
         data_path="aligntune/data/RISCM",
-        batch_size=args["batch_size"],
-        num_workers=24,
+        batch_size=1,
+        num_workers=12,
         processor=processor,
-        num_replacement=2,
+        num_replacement=0,
     )
     module = PaliGemmaModule(
         model=model,
@@ -63,37 +62,33 @@ def train(
         weight_decay=1e-6,
     )
 
+    state_dict = torch.load(args.get("test_checkpoint", None))
+
+    missing, unexpected = module.load_state_dict(state_dict["state_dict"], strict=False)
+    # module.eval()
+
     if args.get("log_wandb", False):
-        logger = (
-            WandbLogger(
-                project=args.get("project_name", "aligntune"),
-                name=args.get("run_name", "paligemma-3b-pt-224"),
-                save_dir="aligntune/logs",
-                offline=args.get("offline", False),
-                log_model="all" if not args.get("offline", False) else None,
-            ),
+        logger = WandbLogger(
+            project=args.get("project_name", "aligntune"),
+            name=args.get("run_name", "paligemma-3b-pt-224"),
+            save_dir="aligntune/logs",
+            offline=args.get("offline", False),
+            log_model="all" if not args.get("offline", False) else None,
+            group="test",
         )
+
     else:
         logger = None
+
     trainer = L.Trainer(
         max_epochs=args["num_epochs"],
         accelerator="auto",
         precision="16-mixed",
         logger=logger,
-        callbacks=[
-            ModelCheckpoint(
-                filename="checkpoint-{epoch:02d}-{step}",
-                save_top_k=-1,
-                save_last=True,
-            ),
-            LearningRateMonitor(logging_interval="step"),
-        ],
         enable_progress_bar=True,
         profiler="simple",
         log_every_n_steps=2,
-        accumulate_grad_batches=2,
-        val_check_interval=0.5,
     )
 
-    # Train the model
-    trainer.fit(module, data_module)
+    # Test the model
+    trainer.test(module, data_module)

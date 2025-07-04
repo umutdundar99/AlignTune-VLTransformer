@@ -41,7 +41,12 @@ class AlignTuneDataset(Dataset):
         task: str = "train",
         num_replacement: int = 2,
     ):
-        self.data = pd.read_csv(os.path.join(path, "captions_cleaned.csv"))
+        self.data = (
+            pd.read_csv(os.path.join(path, "captions_cleaned.csv"))
+            if task != "test"
+            else pd.read_csv(os.path.join(path, "captions.csv"))
+        )
+
         self.data = self.data[self.data["split"] == task]
         self.data["image_path"] = self.data["image"].apply(
             lambda x: os.path.join(path, "resized", x)
@@ -49,6 +54,8 @@ class AlignTuneDataset(Dataset):
         self.num_replacement = num_replacement
         self.task = task
         self.processor = processor
+        # use only 10 samples
+        # self.data = self.data.sample(n=10, random_state=42)
 
     def __len__(self):
         return len(self.data)
@@ -56,15 +63,18 @@ class AlignTuneDataset(Dataset):
     def __getitem__(self, idx):
         image_path = os.path.join(self.data.iloc[idx]["image_path"])
         image = Image.open(image_path).convert("RGB")
+
+        if self.task == "test":
+            captions = [self.data.iloc[idx][f"caption_{i}"] for i in range(1, 6)]
+
+            return {"image": image, "captions": captions}
+
         caption = self.data.iloc[idx]["caption"]
 
         if self.num_replacement > 0:
-            # print(f"Original caption: {caption}")
             caption = self.synonym_replacement(
                 caption, num_replacement=self.num_replacement
             )
-            # print(f"Processed caption: {caption}")
-            # print("-----------------------------------------------")
 
         return {"image": image, "caption": caption}
 
@@ -99,6 +109,19 @@ def custom_collate_fn(examples):
     texts = [possible_prompts[0] for example in examples]
     labels = [example["caption"] for example in examples]
     images = [example["image"] for example in examples]
+    tokens = processor(
+        text=texts, images=images, suffix=labels, return_tensors="pt", padding="longest"
+    )
+    tokens["image"] = images
+    tokens = tokens.to(torch.bfloat16)
+
+    return tokens
+
+
+def custom_collate_fn_test(examples):
+    texts = [possible_prompts[0] for _ in range(1, 6)]
+    labels = examples[0]["captions"]
+    images = [examples[0]["image"] for _ in range(1, 6)]
     tokens = processor(
         text=texts, images=images, suffix=labels, return_tensors="pt", padding="longest"
     )
@@ -161,7 +184,7 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             collate_fn=custom_collate_fn,
-            
+            pin_memory=True,
         )
 
     def val_dataloader(self):
@@ -177,7 +200,7 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             collate_fn=custom_collate_fn,
-            
+            pin_memory=True,
         )
 
     def test_dataloader(self):
@@ -193,5 +216,5 @@ class AlignTuneAnalysisDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             drop_last=True,
-            collate_fn=custom_collate_fn,
+            collate_fn=custom_collate_fn_test,
         )
